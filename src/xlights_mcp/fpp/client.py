@@ -146,9 +146,11 @@ def read_log(config: FPPConfig, name: str, lines: int = 200, grep: str | None = 
         return resp
     if resp.text.startswith("File ") and resp.text.rstrip().endswith("does not exist."):
         return {"error": f"{name} does not exist on FPP {config.label}"}
-    if b"\0" in resp.content[:4096]:
-        return {"error": f"{name} is not a text file"}
-    all_lines = redact_text(resp.text).splitlines()
+    if resp.content[:2] in (b"PK", b"\x1f\x8b"):
+        return {"error": f"{name} is compressed, not a text file"}
+    # Runs of NUL bytes mean the FPP lost power before the log blocks were written: keep them visible.
+    text = re.sub("\0+", lambda m: f"[{len(m.group())} NUL bytes: unclean power-off?]\n", resp.text)
+    all_lines = redact_text(text).splitlines()
     picked = all_lines
     if grep:
         try:

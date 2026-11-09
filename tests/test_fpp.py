@@ -126,6 +126,8 @@ def test_logs_list_and_tail(cfg, monkeypatch):
             return httpx.Response(404, request=req)
         if url.endswith("/api/file/Logs/var/log/syslog"):
             return httpx.Response(200, text="boot ok", request=req)
+        if url.endswith("/api/file/Logs/cut.log"):
+            return httpx.Response(200, content=b"before\n\0\0\0after\n", request=req)
         if url.endswith("/api/file/Logs/gone.log"):
             return httpx.Response(200, text="File /home/fpp/media/logs/gone.log does not exist.", request=req)
         assert url.endswith("/api/file/Logs/fppd.log")
@@ -144,3 +146,4 @@ def test_logs_list_and_tail(cfg, monkeypatch):
     assert "error" in client.read_log(radio, "/etc/shadow")
     assert "does not exist" in client.read_log(radio, "gone.log")["error"]
     assert client.read_log(radio, "/var/log/syslog")["text"] == "boot ok"
+    assert client.read_log(radio, "cut.log")["text"] == "before\n[3 NUL bytes: unclean power-off?]\nafter"
