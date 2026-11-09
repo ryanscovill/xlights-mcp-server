@@ -97,3 +97,50 @@ def test_401_explains_without_leaking(cfg, monkeypatch):
     assert "rejected" in err and SECRET not in err
     err = client.get_fpp_status(cfg.resolve("matrix"))["error"]
     assert "no password configured" in err
+
+
+def test_status_redacts_wifi_key(cfg, monkeypatch):
+    status = {"interfaces": [{"ifname": "wlan0", "config": {"SSID": "Home", "PSK": "wifi-key-123", "ADDRESS": "1.2.3.4"}}],
+              "wifi_password": "pw2", "empty": {"PSK": ""}}
+
+    def fake(method, url, auth=None, timeout=None, **kw):
+        return httpx.Response(200, json=status, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(httpx, "request", fake)
+    out = client.get_fpp_status(cfg.resolve("radio"))
+    dumped = json.dumps(out)
+    assert "wifi-key-123" not in dumped and "pw2" not in dumped
+    conf = out["status"]["interfaces"][0]["config"]
+    assert conf["PSK"] == client.REDACTED and conf["SSID"] == "Home" and conf["ADDRESS"] == "1.2.3.4"
+    assert out["status"]["empty"]["PSK"] == ""
+
+
+def test_logs_list_and_tail(cfg, monkeypatch):
+    log = "\n".join([f"line {i}" for i in range(10)] + ['wpa psk="abc123" ok', "ERROR boom", "Password: hunter2"])
+
+    def fake(method, url, auth=None, timeout=None, **kw):
+        req = httpx.Request(method, url)
+        if url.endswith("/api/files/logs"):
+            return httpx.Response(200, json={"files": [{"name": "fppd.log", "sizeBytes": 9, "mtime": "now"}]}, request=req)
+        if url.endswith("/api/files/crashes"):
+            return httpx.Response(404, request=req)
+        if url.endswith("/api/file/Logs/var/log/syslog"):
+            return httpx.Response(200, text="boot ok", request=req)
+        if url.endswith("/api/file/Logs/gone.log"):
+            return httpx.Response(200, text="File /home/fpp/media/logs/gone.log does not exist.", request=req)
+        assert url.endswith("/api/file/Logs/fppd.log")
+        return httpx.Response(200, text=log, request=req)
+
+    monkeypatch.setattr(httpx, "request", fake)
+    radio = cfg.resolve("radio")
+    listed = client.list_logs(radio)
+    assert listed["logs"] == [{"name": "fppd.log", "bytes": 9, "modified": "now"}] and listed["crash_reports"] == []
+    out = client.read_log(radio, "fppd.log", lines=3)
+    assert out["total_lines"] == 13 and out["shown_lines"] == 3
+    assert "abc123" not in out["text"] and "hunter2" not in out["text"] and "ERROR boom" in out["text"]
+    out = client.read_log(radio, "fppd.log", grep="error|line 9")
+    assert out["matching_lines"] == 2 and out["text"] == "line 9\nERROR boom"
+    assert "error" in client.read_log(radio, "../config/settings")
+    assert "error" in client.read_log(radio, "/etc/shadow")
+    assert "does not exist" in client.read_log(radio, "gone.log")["error"]
+    assert client.read_log(radio, "/var/log/syslog")["text"] == "boot ok"

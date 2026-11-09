@@ -1572,6 +1572,28 @@ def fpp_status(fpp: str | None = None) -> dict:
 
 
 @mcp.tool()
+def fpp_logs(fpp: str | None = None, log: str | None = None, lines: int = 200, grep: str | None = None) -> dict:
+    """Read a Falcon Pi Player's log files (read-only; secrets such as Wi-Fi keys are redacted).
+
+    Without `log`, lists the log files and crash reports with sizes and times.
+    With `log` (e.g. "fppd.log"), returns its last `lines` lines (max 2000).
+
+    Args:
+        fpp: Which FPP: a target name from the server's FPP config (e.g. "radio", "matrix"),
+            a host/IP, or omit for the default host. Logins come from the FPP env file.
+        log: Log file name from the list; omit to list them
+        lines: How many lines to return from the end of the log (after filtering)
+        grep: Only lines matching this (case-insensitive regex, or plain text if it isn't valid regex)
+    """
+    from xlights_mcp.fpp.client import list_logs, read_log
+
+    cfg = _fpp(fpp)
+    if isinstance(cfg, dict):
+        return cfg
+    return list_logs(cfg) if not log else read_log(cfg, log, lines, grep)
+
+
+@mcp.tool()
 def fpp_list_targets() -> dict:
     """List the FPPs this server knows by name, and whether a login is configured for each.
 
