@@ -15,34 +15,47 @@ def _base_url(config: FPPConfig) -> str:
     return f"http://{config.host}:{config.port}"
 
 
-def _get(config: FPPConfig, path: str) -> dict:
+def _http_error(config: FPPConfig, e: httpx.HTTPStatusError) -> dict:
+    code = e.response.status_code
+    if code == 401:
+        hint = (
+            "no password configured for this FPP (add FPP_PASS_<NAME> to the FPP env file)"
+            if config.auth() is None
+            else "the password in the FPP env file was rejected"
+        )
+        return {"error": f"FPP {config.label} refused the login (HTTP 401): {hint}"}
+    return {"error": f"FPP {config.label} answered HTTP {code} for {e.request.url.path}"}
+
+
+def _request(config: FPPConfig, method: str, path: str, **kw) -> dict:
+    url = f"{_base_url(config)}/api{path}"
+    try:
+        resp = httpx.request(method, url, auth=config.auth(), timeout=kw.pop("timeout", config.timeout), **kw)
+        resp.raise_for_status()
+        if not resp.content:
+            return {"success": True}
+        try:
+            return resp.json()
+        except ValueError:
+            return {"success": True, "text": resp.text[:500]}
+    except httpx.ConnectError:
+        return {"error": f"Cannot connect to FPP at {config.label}. Is it on the network?"}
+    except httpx.TimeoutException:
+        return {"error": f"Timeout connecting to FPP at {config.label}"}
+    except httpx.HTTPStatusError as e:
+        return _http_error(config, e)
+    except Exception as e:
+        return {"error": f"FPP {config.label}: {type(e).__name__}"}
+
+
+def _get(config: FPPConfig, path: str, **kw) -> dict:
     """Make a GET request to the FPP API."""
-    url = f"{_base_url(config)}/api{path}"
-    try:
-        resp = httpx.get(url, timeout=config.timeout)
-        resp.raise_for_status()
-        return resp.json()
-    except httpx.ConnectError:
-        return {"error": f"Cannot connect to FPP at {config.host}:{config.port}. Is it on the network?"}
-    except httpx.TimeoutException:
-        return {"error": f"Timeout connecting to FPP at {config.host}:{config.port}"}
-    except Exception as e:
-        return {"error": str(e)}
+    return _request(config, "GET", path, **kw)
 
 
-def _post(config: FPPConfig, path: str, data: dict | None = None) -> dict:
+def _post(config: FPPConfig, path: str, data: dict | None = None, **kw) -> dict:
     """Make a POST request to the FPP API."""
-    url = f"{_base_url(config)}/api{path}"
-    try:
-        resp = httpx.post(url, json=data, timeout=config.timeout)
-        resp.raise_for_status()
-        return resp.json() if resp.content else {"success": True}
-    except httpx.ConnectError:
-        return {"error": f"Cannot connect to FPP at {config.host}:{config.port}"}
-    except httpx.TimeoutException:
-        return {"error": f"Timeout connecting to FPP at {config.host}:{config.port}"}
-    except Exception as e:
-        return {"error": str(e)}
+    return _request(config, "POST", path, json=data, **kw)
 
 
 def get_fpp_status(config: FPPConfig) -> dict:
@@ -53,6 +66,7 @@ def get_fpp_status(config: FPPConfig) -> dict:
 
     return {
         "connected": True,
+        "fpp": config.name or None,
         "host": config.host,
         "status": status,
     }

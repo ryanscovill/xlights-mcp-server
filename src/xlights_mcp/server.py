@@ -1547,62 +1547,109 @@ async def remap_sequence(
 # ---------------------------------------------------------------------------
 
 
+def _fpp(fpp: str | None):
+    """Resolve the `fpp` tool argument (target name, host/IP, or None) to a config, or an error dict."""
+    try:
+        return get_config().fpp.resolve(fpp)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
 @mcp.tool()
-def fpp_status() -> dict:
+def fpp_status(fpp: str | None = None) -> dict:
     """Check Falcon Pi Player connection status and current state.
 
     Returns FPP version, current playlist, scheduler state, etc.
+
+    Args:
+        fpp: Which FPP: a target name from the server's FPP config (e.g. "radio", "matrix"),
+            a host/IP, or omit for the default host. Logins come from the FPP env file.
     """
     from xlights_mcp.fpp.client import get_fpp_status
 
-    config = get_config()
-    return get_fpp_status(config.fpp)
+    cfg = _fpp(fpp)
+    return cfg if isinstance(cfg, dict) else get_fpp_status(cfg)
 
 
 @mcp.tool()
-def fpp_upload_sequence(fseq_path: str, audio_path: str | None = None) -> dict:
-    """Upload a sequence (.fseq) and optional audio to Falcon Pi Player.
+def fpp_list_targets() -> dict:
+    """List the FPPs this server knows by name, and whether a login is configured for each.
+
+    Never returns passwords.
+    """
+    base = get_config().fpp
+    out = {}
+    for name in sorted(base.targets):
+        cfg = base.resolve(name)
+        out[name] = {"host": cfg.host, "login_configured": cfg.auth() is not None}
+    return {"default_host": base.host, "targets": out}
+
+
+@mcp.tool()
+def fpp_upload_sequence(
+    fseq_path: str, fpp: str | None = None, audio_path: str | None = None, force: bool = False
+) -> dict:
+    """Upload a sequence (.fseq) and optional audio to a Falcon Pi Player, then verify it landed.
+
+    Refuses to overwrite a sequence the FPP is playing right now unless force=True.
 
     Args:
         fseq_path: Path to the .fseq file to upload
+        fpp: Which FPP: a target name from the server's FPP config (e.g. "radio", "matrix"),
+            a host/IP, or omit for the default host. Logins come from the FPP env file.
         audio_path: Optional path to the audio file (.mp3/.ogg)
+        force: Overwrite even if that sequence is playing
     """
     from xlights_mcp.fpp.upload import upload_sequence
 
-    config = get_config()
-    return upload_sequence(config.fpp, Path(fseq_path), Path(audio_path) if audio_path else None)
+    cfg = _fpp(fpp)
+    if isinstance(cfg, dict):
+        return cfg
+    return upload_sequence(cfg, Path(fseq_path), Path(audio_path) if audio_path else None, force)
 
 
 @mcp.tool()
-def fpp_list_playlists() -> dict:
-    """List all playlists on the Falcon Pi Player."""
+def fpp_list_playlists(fpp: str | None = None) -> dict:
+    """List all playlists on a Falcon Pi Player.
+
+    Args:
+        fpp: Which FPP: a target name from the server's FPP config (e.g. "radio", "matrix"),
+            a host/IP, or omit for the default host. Logins come from the FPP env file.
+    """
     from xlights_mcp.fpp.client import list_playlists
 
-    config = get_config()
-    return list_playlists(config.fpp)
+    cfg = _fpp(fpp)
+    return cfg if isinstance(cfg, dict) else list_playlists(cfg)
 
 
 @mcp.tool()
-def fpp_start_playlist(playlist_name: str, repeat: bool = False) -> dict:
-    """Start a playlist on the Falcon Pi Player.
+def fpp_start_playlist(playlist_name: str, repeat: bool = False, fpp: str | None = None) -> dict:
+    """Start a playlist on a Falcon Pi Player.
 
     Args:
         playlist_name: Name of the playlist to start
         repeat: Whether to loop the playlist
+        fpp: Which FPP: a target name from the server's FPP config (e.g. "radio", "matrix"),
+            a host/IP, or omit for the default host. Logins come from the FPP env file.
     """
     from xlights_mcp.fpp.client import start_playlist
 
-    config = get_config()
-    return start_playlist(config.fpp, playlist_name, repeat)
+    cfg = _fpp(fpp)
+    return cfg if isinstance(cfg, dict) else start_playlist(cfg, playlist_name, repeat)
 
 
 @mcp.tool()
-def fpp_stop() -> dict:
-    """Stop current playback on the Falcon Pi Player."""
+def fpp_stop(fpp: str | None = None) -> dict:
+    """Stop current playback on a Falcon Pi Player.
+
+    Args:
+        fpp: Which FPP: a target name from the server's FPP config (e.g. "radio", "matrix"),
+            a host/IP, or omit for the default host. Logins come from the FPP env file.
+    """
     from xlights_mcp.fpp.client import stop_playback
 
-    config = get_config()
-    return stop_playback(config.fpp)
+    cfg = _fpp(fpp)
+    return cfg if isinstance(cfg, dict) else stop_playback(cfg)
 
 
 # ---------------------------------------------------------------------------
